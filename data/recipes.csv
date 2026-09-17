@@ -1,4 +1,4 @@
-제품명,재료명,1개당필요량,단위
+product,ingredient,amount_per_unit,unit
 식빵,강력분,100,g
 식빵,우유,70,g
 식빵,버터,7,g

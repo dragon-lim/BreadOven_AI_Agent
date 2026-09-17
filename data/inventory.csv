@@ -1,4 +1,4 @@
-재료명,현재재고량,단위,최소재고기준,유통기한
+ingredient,current_stock,unit,min_stock,expiry
 강력분,6000,g,5000,+3m
 박력분,2000,g,5000,+3m
 우유,2000,ml,2000,+7d
