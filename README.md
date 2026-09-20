@@ -6,7 +6,8 @@
 
 ## プロジェクト概要
 
-![Uploading project_jp.png…]()
+<img width="1774" height="887" alt="project_jp" src="https://github.com/user-attachments/assets/54f98ae6-136d-435c-9005-99450dec6a5e" />
+
 
 
 
