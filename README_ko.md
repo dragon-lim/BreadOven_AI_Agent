@@ -6,7 +6,7 @@
 
 ## 프로젝트 소개
 
-![Uploading project.png…]()
+<img width="1536" height="1024" alt="project" src="https://github.com/user-attachments/assets/ca9d1922-cf24-4e21-9a18-55bb76c5403c" />
 
 
 ### 프로젝트를 계획한 이유
