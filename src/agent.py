@@ -197,14 +197,15 @@ def calculate_shortage() -> str:
     return f"내일({get_tomorrow()}요일) 생산 기준 발주 필요 재료:\n{result.to_string(index=False)}"
 
 
+def parse_expiry(s):
+    """'+7d', '+3m', '+1y' 형식을 남은 일수로 변환"""
+    return int(s[1:-1]) * {"d": 1, "m": 30, "y": 365}[s[-1]]
+
+
 @tool
 def check_expiry() -> str:
     """유통기한이 7일 이내로 임박한 재료를 반환한다."""
     inventory = pd.read_csv(DATA_DIR / "inventory.csv")
-
-    # '+7d', '+3m', '+1y' 형식을 남은 일수로 변환
-    def parse_expiry(s):
-        return int(s[1:-1]) * {"d": 1, "m": 30, "y": 365}[s[-1]]
 
     inventory["days_left"] = inventory["expiry"].apply(parse_expiry)
     warning = inventory[inventory["days_left"] <= 7][["ingredient", "days_left", "current_stock", "unit"]]
@@ -214,20 +215,96 @@ def check_expiry() -> str:
     return f"유통기한 임박 재료:\n{warning.to_string(index=False)}"
 
 
+@tool
+def recommend_products() -> str:
+    """유통기한 임박 재료(7일 이내)를 가장 많은 종류로 사용하는 제품 1개와, 현재 임박 재료 재고로 만들 수 있는 생산 수량을 추천한다."""
+    import math
+    recipes = pd.read_csv(DATA_DIR / "recipes.csv")
+    inventory = pd.read_csv(DATA_DIR / "inventory.csv")
+
+    inventory["days_left"] = inventory["expiry"].apply(parse_expiry)
+    expiring = inventory[inventory["days_left"] <= 7]
+    if expiring.empty:
+        return "유통기한 임박 재료가 없어 추천할 제품 없음"
+    expiring_stock = expiring.set_index("ingredient")["current_stock"]
+
+    # 제품별 임박 재료 사용 현황
+    rows = []
+    for product, recipe in recipes.groupby("product"):
+        used = recipe[recipe["ingredient"].isin(expiring_stock.index)]
+        if used.empty:
+            continue
+        # 현재 임박 재료 재고만으로 만들 수 있는 수량 (가장 먼저 떨어지는 임박 재료 기준)
+        qty = min(math.floor(expiring_stock[r.ingredient] / r.amount_per_unit) for r in used.itertuples())
+        rows.append({
+            "제품": product,
+            "추천 수량": qty,
+            "사용하는 임박 재료": ", ".join(used["ingredient"]),
+            "종류 수": len(used),
+            "총 사용량": qty * used["amount_per_unit"].sum(),
+        })
+
+    # 임박 재료를 가장 많은 종류로 쓰는 제품 우선, 같으면 임박 재료 총 사용량이 많은 제품
+    best = pd.DataFrame(rows).sort_values(["종류 수", "총 사용량"], ascending=False).iloc[0]
+    if best["추천 수량"] == 0:
+        return f"추천할 제품 없음 ({best['제품']}을(를) 1개 만들 만큼의 임박 재료 재고가 없음)"
+
+    # 추천 수량만큼 생산했을 때 임박 재료별 사용량과 남는 양
+    recipe = recipes[(recipes["product"] == best["제품"]) & recipes["ingredient"].isin(expiring_stock.index)]
+    usage = pd.DataFrame({
+        "재료": recipe["ingredient"],
+        "남은일수": recipe["ingredient"].map(expiring.set_index("ingredient")["days_left"]),
+        "현재재고": recipe["ingredient"].map(expiring_stock),
+        "사용량": recipe["amount_per_unit"] * best["추천 수량"],
+        "단위": recipe["unit"],
+    })
+    usage["사용후남는양"] = usage["현재재고"] - usage["사용량"]
+
+    return (
+        f"추천 제품: {best['제품']} {best['추천 수량']}개 (임박 재료 {best['종류 수']}종 사용: {best['사용하는 임박 재료']})\n"
+        f"임박 재료별 사용량:\n{usage.to_string(index=False)}"
+    )
+
+
+@tool
+def get_recipes() -> str:
+    """모든 제품의 레시피(제품별 재료와 제품 1개당 재료 사용량)를 계산 없이 그대로 반환한다."""
+    recipes = pd.read_csv(DATA_DIR / "recipes.csv")
+    return f"레시피 (제품 1개당 사용량):\n{recipes.to_string(index=False)}"
+
+
 # ── Agent 구성 ──────────────────────────────────────────
 
-tools = [get_tomorrow_production, calculate_shortage, check_expiry]
+# 추천 생산 제품을 정하는 방식
+#   "rule": recommend_products 도구가 파이썬으로 계산해 답을 줌
+#   "llm" : 도구는 레시피 원본만 주고, 모델이 지침만 보고 직접 판단·계산함
+RECOMMEND_MODE = os.getenv("RECOMMEND_MODE", "llm")
+
+RECOMMEND_RULES = {
+    "rule": """(표 바로 아래에 위 두 줄을 그대로 쓰고, {제품}과 {수량}은 recommend_products 도구 결과로 채우기)
+(추천할 제품이 없으면 "추천 물량: 없음"이라고 쓰기)""",
+    "llm": """(표 바로 아래에 위 두 줄을 그대로 쓰기)
+{제품}과 {수량}은 get_recipes 도구의 레시피와 check_expiry 도구의 임박 재료 재고를 보고 당신이 직접 정하세요.
+- 제품 선택: 유통기한 임박 재료를 가장 많은 종류로 사용하는 제품 1개를 고르기.
+  종류 수가 같으면 임박 재료를 더 많이 소진하는 제품을 고르기.
+- 수량: 고른 제품에 들어가는 임박 재료마다 (현재 재고 ÷ 제품 1개당 사용량)을 계산해 소수점은 버리고,
+  그중 가장 작은 값을 추천 수량으로 하기. 임박 재료가 아닌 재료와 내일 생산 계획은 고려하지 않기.
+(추천할 제품이 없으면 "추천 물량: 없음"이라고 쓰기)""",
+}[RECOMMEND_MODE]
+
+recommend_tool = recommend_products if RECOMMEND_MODE == "rule" else get_recipes
+tools = [get_tomorrow_production, calculate_shortage, check_expiry, recommend_tool]
 
 llm = ChatOpenAI(model=MODEL)
 
-SYSTEM_PROMPT = """당신은 빵집 재고 관리 AI Agent입니다.
+SYSTEM_PROMPT = f"""당신은 빵집 재고 관리 AI Agent입니다.
 발주는 매일 퇴근 전 진행 됩니다.
 당신이 계산해야 하는건 오늘의 발주 상황이 아니라 내일을 위한 발주 상황입니다.
 퇴근하기 전, 직원 발주하기 전 당신에게 현재 재고 상황과 내일 생산량을 비교해 주문해야하는 발주량을 물어봅니다, 책임감을 가지고 안내하십쇼
 주어진 도구를 사용해 현재 재고와 내일 생산 계획을 비교하고, 아래 형식의 마크다운으로 한국어로 간결하게 보고하세요.
 
 ## 발주 필요 재료
-| 재료 | 현재 재고 | 내일 필요량 | 최소 재고 | 부족량 | 주문 수량 |
+제품 - | 재료 | 현재 재고 - 내일 필요량 (부족한 수량) | 추천 주문 수량 |
 (주문 수량은 "2포대"처럼 도구가 준 주문수량과 주문단위를 붙여 쓰기)
 (부족한 재료가 없으면 "없음"이라고 쓰기)
 
@@ -235,10 +312,13 @@ SYSTEM_PROMPT = """당신은 빵집 재고 관리 AI Agent입니다.
 | 재료 | 남은 일수 | 현재 재고 |
 (임박 재료가 없으면 "없음"이라고 쓰기)
 
-## 요약
-- 퇴근 전 발주할 때 직원이 확인할 일 2~3가지를 한 줄씩
+**추천 물량: {{제품}} (약 {{수량}}개) 추천**
+※ 유통기한 임박 물량은 생산 전 다른 재료의 수량을 확인하세요
+{RECOMMEND_RULES}
 
-수량에는 천 단위 쉼표와 단위를 붙이고, 인사말이나 불필요한 설명은 쓰지 마세요. 간결하게 보고하십쇼"""
+제품 이름과 재료 이름은 도구 결과(recipes.csv에 등록된 이름)를 글자 그대로 쓰고, 줄이거나 바꿔 부르지 마세요.
+위 형식 외에 요약, 확인 사항, 주의 문구, 계산 방식 설명 등 다른 문장은 쓰지 마세요.
+수량에는 천 단위 쉼표와 단위를 붙이세요."""
 
 agent = create_agent(model=llm, tools=tools, system_prompt=SYSTEM_PROMPT)
 
@@ -247,6 +327,8 @@ TOOL_LABELS = {
     "get_tomorrow_production": "내일 생산 계획 조회",
     "calculate_shortage": "재료 부족량 계산",
     "check_expiry": "유통기한 확인",
+    "recommend_products": "추천 생산 제품 계산",
+    "get_recipes": "레시피 조회",
 }
 
 # OpenAI 오류를 짧은 안내 문구로 변환
