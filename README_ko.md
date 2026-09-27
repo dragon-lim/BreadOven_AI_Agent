@@ -104,27 +104,24 @@ Agent가 현재 재고로는 내일 생산량을 충당할 수 없다고 판단�
 
 ## 기술 스택
 
-> 개발 진행에 따라 업데이트 예정
-
-* **언어**: Python
-* **AI / Agent**: LangChain 또는 LangGraph + OpenAI API (또는 동급 LLM API)
-* **바코드**: pyzbar / python-barcode
-* **데이터**: CSV → SQLite (단계적 전환 예정)
-* **외부 연동**: Google Calendar API
-* **Web**: FastAPI 또는 Streamlit (UI 구성 시)
+* **언어**: Python 3.11+
+* **AI / Agent**: LangChain + OpenAI API (gpt-6-sol)
+* **데이터**: pandas, CSV
+* **출력**: rich (터미널 UI)
+* **환경 설정**: python-dotenv
 
 ## 프로젝트 진행 상황
 
-* [ ] 프로젝트 설계
-* [ ] 데이터 구조 설계
-* [ ] 재료 및 레시피 데이터 구축
+* [x] 프로젝트 설계
+* [x] 데이터 구조 설계
+* [x] 재료 및 레시피 데이터 구축
 * [ ] 바코드 기능 구현
-* [ ] 재고 관리 기능 구현
-* [ ] 생산 계획 기능 구현
-* [ ] 재고 분석 기능 구현
-* [ ] AI Agent 구현
-* [ ] 발주서 자동 갱신
-* [ ] 유통기한 기반 제품 추천
+* [x] 재고 관리 기능 구현
+* [x] 생산 계획 기능 구현
+* [x] 재고 분석 기능 구현
+* [x] AI Agent 구현
+* [x] 발주서 자동 갱신
+* [x] 유통기한 기반 제품 추천
 * [ ] 테스트 및 검증
 
 ## 프로젝트 목표
